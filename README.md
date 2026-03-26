@@ -6,10 +6,16 @@ Available for **Windows** and **macOS**.
 
 ---
 
+## Screenshot
+
+![PDF Shrinker on Windows](screenshot_windows.png)
+
+---
+
 ## For End Users — Using the App
 
 ### Option 1: Drag and Drop
-Drag any `.pdf` file directly onto `PDF Shrinker.exe` (Windows) or `PDF Shrinker` (macOS). The app opens with the input and output fields already filled in. Just click **Compress PDF**.
+Drag any `.pdf` file directly onto `PDF Shrinker.exe` (Windows) or `PDF Shrinker.app` (macOS). The app opens with the input and output fields already filled in. Just click **Compress PDF**.
 
 ### Option 2: Browse for a File
 Open the app, click **Browse…** next to the Input field, select your PDF, then click **Compress PDF**.
@@ -20,15 +26,15 @@ The output file is saved alongside the original with `_compressed` added to the 
 
 | Preset | Image DPI | Best For | Typical Savings |
 |--------|-----------|----------|-----------------|
-| screen (72 dpi – smallest) | 72 | Email, web sharing | 60–85% |
-| ebook (150 dpi – balanced) | 150 | General use, e-readers | 40–70% |
-| printer (300 dpi – quality) | 300 | Desktop printing | 20–50% |
-| prepress (high quality) | 300+ | Commercial/professional printing | 10–30% |
+| Screen | 72 dpi | Email, web sharing | 60–85% |
+| Ebook | 150 dpi | General use, e-readers | 40–70% |
+| Printer | 300 dpi | Desktop printing | 20–50% |
+| Prepress | 300+ dpi | Commercial/professional printing | 10–30% |
 
 > **Tip:** If a compressed file ends up *larger* than the original, the source PDF was already well-optimised. Keep the original.
 
 ### Progress Bar
-The progress bar tracks compression page-by-page in real time. When finished, the result panel displays the original size, compressed size, and total savings.
+The progress bar tracks compression page-by-page in real time. When finished, the result panel displays the original size, compressed size, and total savings. The Saved card turns green when space is successfully recovered.
 
 ---
 
@@ -36,7 +42,7 @@ The progress bar tracks compression page-by-page in real time. When finished, th
 
 > **Cross-compilation is not possible.** You must build on the target platform:
 > - Build the Windows `.exe` on a Windows machine
-> - Build the macOS app on a Mac
+> - Build the macOS `.app` on a Mac
 
 ---
 
@@ -63,7 +69,8 @@ The script will:
 - Auto-detect your Ghostscript installation by scanning `C:\Program Files\gs\gs*\bin\`
 - Copy GS binaries, DLLs, fonts, and resource files into a staging folder
 - Install Python dependencies (`pypdf`, `Pillow`, `pyinstaller`) via pip
-- Run PyInstaller to produce a single bundled `.exe`
+- Run PyInstaller with the bundled app icon (`app_icon.ico`)
+- Flush the Windows icon cache so the icon appears immediately
 - Clean up staging files
 
 **Output:** `dist\PDF Shrinker.exe` (~40–55 MB)
@@ -71,10 +78,13 @@ The script will:
 #### Windows Troubleshooting
 
 **`'pyinstaller' is not recognized`**
-Your Python Scripts folder is not on PATH. `build.bat` calls `python -m PyInstaller` to avoid this, so it shouldn't occur. If it does, run `python -m pip install pyinstaller` manually.
+Your Python Scripts folder is not on PATH. `build.bat` calls `python -m PyInstaller` to avoid this. If it still fails, run `python -m pip install pyinstaller` manually.
 
 **`Ghostscript not found`**
 The script scans standard install paths and PATH. If it still fails, confirm GS is installed, then try adding `C:\Program Files\gs\gs<version>\bin` to your system PATH.
+
+**App shows Python icon instead of custom icon**
+This is a Windows icon cache issue. Try: right-click the `.exe` → Properties to confirm the icon is embedded. If it shows there but not in Explorer, run `ie4uinit.exe -show` in a command prompt or restart Explorer.
 
 **Antivirus false positive**
 PyInstaller bundles a Python interpreter and DLLs into a single file, which some heuristic scanners flag. This is a known false positive. Whitelist the `.exe` in your AV software if needed.
@@ -91,34 +101,27 @@ PyInstaller bundles a Python interpreter and DLLs into a single file, which some
 | Homebrew | https://brew.sh |
 | Ghostscript | `brew install ghostscript` |
 | dylibbundler | `brew install dylibbundler` |
+| python-tk | `brew install python-tk` |
 
-`dylibbundler` is needed to collect and fix up the `.dylib` dependencies that Ghostscript links against, making the binary self-contained.
-
-All tools only need to be on the **build machine**. The output app bundles everything.
+`dylibbundler` collects and fixes up the `.dylib` dependencies that Ghostscript links against. `python-tk` provides tkinter, which Homebrew's Python omits by default.
 
 #### Steps
 
 ```bash
-# Install prerequisites (one time)
-brew install ghostscript dylibbundler
-pip3 install pypdf Pillow pyinstaller
-
-# Build
+brew install ghostscript dylibbundler python-tk
 chmod +x build_mac.sh
 ./build_mac.sh
 ```
 
 The script will:
 - Auto-detect Ghostscript in Homebrew (Apple Silicon `/opt/homebrew/bin/gs` and Intel `/usr/local/bin/gs`)
-- Copy the `gs` binary into a staging folder
-- Run `dylibbundler` to collect all `.dylib` dependencies and fix their runtime paths
+- Copy the `gs` binary and run `dylibbundler` to collect all `.dylib` dependencies
 - Copy GS fonts, lib, and Resource files
-- Run PyInstaller to produce a self-contained app
-- Clean up staging files
+- Create a temporary Python virtual environment (avoids macOS PEP 668 restrictions)
+- Run PyInstaller with the bundled app icon (`app_icon.icns`)
+- Clean up all staging files and the venv
 
-**Output:** `dist/PDF Shrinker` (single binary, ~45–60 MB)
-
-To produce a proper `.app` bundle you can double-click and drag to Applications, remove `--onefile` from the PyInstaller call in `build_mac.sh` — it will produce `dist/PDF Shrinker.app` instead.
+**Output:** `dist/PDF Shrinker.app` — drag to Applications to install.
 
 #### macOS Troubleshooting
 
@@ -128,15 +131,18 @@ Run `brew install dylibbundler`.
 **`Ghostscript not found`**
 Run `brew install ghostscript`. The script checks `/opt/homebrew/bin/gs` (Apple Silicon) and `/usr/local/bin/gs` (Intel) automatically.
 
+**`Could not find a Python installation with tkinter`**
+Run `brew install python-tk`. Homebrew's Python omits tkinter by default; this package adds it.
+
 **Gatekeeper / "app is damaged" warning**
-macOS may block unsigned apps downloaded from the internet. To allow it:
+macOS blocks unsigned apps downloaded from the internet. To allow it:
 ```bash
-xattr -cr "/path/to/PDF Shrinker"
+xattr -cr "/path/to/PDF Shrinker.app"
 ```
 Or right-click the app → Open → Open anyway.
 
 **Apple Silicon (M1/M2/M3) vs Intel**
-The app will be built for whichever architecture your Mac uses. To build a universal binary that runs natively on both, add `--target-arch universal2` to the PyInstaller call in `build_mac.sh` — but both Python and all bundled libraries must themselves be universal, which requires extra setup.
+The app builds for your Mac's architecture. To build a universal binary, add `--target-arch universal2` to the PyInstaller call in `build_mac.sh` — but all bundled libraries must themselves be universal.
 
 ---
 
@@ -154,16 +160,14 @@ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4
 
 ### Bundled Ghostscript
 
-**Windows:** `build.bat` copies `gswin64.exe` (or `gswin64c.exe`) and all `.dll` files from your Ghostscript install into the PyInstaller bundle under `gs_bin/`.
+**Windows:** `build.bat` copies `gswin64.exe` (or `gswin64c.exe`) and all `.dll` files from your local Ghostscript install into the PyInstaller bundle under `gs_bin/`.
 
-**macOS:** `build_mac.sh` copies the `gs` binary, then runs `dylibbundler` to trace all `.dylib` dependencies (Homebrew libraries, system libraries) and copy them alongside the binary with corrected `@executable_path`-relative rpaths, so the binary finds them inside the bundle rather than on the build machine's filesystem.
+**macOS:** `build_mac.sh` copies the `gs` binary, then runs `dylibbundler` to trace all `.dylib` dependencies and copy them alongside the binary with corrected `@executable_path`-relative rpaths so they're found inside the bundle rather than on the build machine's filesystem.
 
-In both cases, a marker file (`gs_bin/gs_exe_name.txt`) records the executable name so the app can locate it at runtime via `sys._MEIPASS`.
+A marker file (`gs_bin/gs_exe_name.txt`) records the executable name so the app can locate it at runtime via `sys._MEIPASS`.
 
 ### Live Progress
-Ghostscript prints `Page N` to stdout as it processes each page. The app reads this line-by-line in a background thread and converts page number / total pages into a 0–95% progress value. The final 5% completes when the process exits cleanly.
-
-On Windows, the subprocess is launched with `CREATE_NO_WINDOW` so no console box appears. On macOS this flag is not used (macOS GUI apps don't have a console window).
+Ghostscript prints `Page N` to stdout as it processes each page. The app reads this line-by-line in a background thread and converts page number / total pages into a 0–95% progress value. The final 5% completes when the process exits cleanly. On Windows, the subprocess is launched with `CREATE_NO_WINDOW` so no console box appears.
 
 ### Fallback Mode (no Ghostscript)
 If Ghostscript is not detected, the app falls back to a pure-Python pipeline using `pypdf` and `Pillow`. It re-compresses embedded images as JPEG at a user-chosen quality level and strips redundant objects. Effective for image-heavy PDFs; less so for text-only ones.
@@ -177,18 +181,22 @@ Windows and macOS both pass a dragged file's path as `sys.argv[1]` when a file i
 
 ```
 pdf_shrinker/
-├── pdf_shrinker.py   — Main application (GUI + compression logic)
-├── build.bat         — Windows build script
-├── build_mac.sh      — macOS build script
-├── requirements.txt  — Python dependencies
-└── README.md         — This file
+├── pdf_shrinker.py        — Main application (GUI + compression logic)
+├── build.bat              — Windows build script
+├── build_mac.sh           — macOS build script
+├── requirements.txt       — Python dependencies
+├── app_icon.ico           — Windows app icon (multi-size)
+├── app_icon.icns          — macOS app icon
+├── app_icon.png           — Icon source image
+├── screenshot_windows.png — Windows screenshot
+└── README.md              — This file
 ```
 
 After building:
 ```
 dist/
-├── PDF Shrinker.exe      ← Windows output
-└── PDF Shrinker          ← macOS output (or PDF Shrinker.app)
+├── PDF Shrinker.exe    ← Windows output (~40–55 MB)
+└── PDF Shrinker.app    ← macOS output (~45–60 MB)
 ```
 
 ---

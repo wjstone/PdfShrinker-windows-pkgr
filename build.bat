@@ -95,6 +95,13 @@ pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo ERROR: pip failed. & pause & exit /b 1 )
 echo.
 
+REM ── Check icon exists ───────────────────────────────────────
+if not exist "%~dp0app_icon.ico" (
+    echo ERROR: app_icon.ico not found next to build.bat
+    pause & exit /b 1
+)
+set ICON_PATH=%~dp0app_icon.ico
+
 REM ── Build with PyInstaller ───────────────────────────────────
 echo [3/4] Building executable (this takes a minute)...
 python -m PyInstaller ^
@@ -102,7 +109,7 @@ python -m PyInstaller ^
     --windowed ^
     --name "PDF Shrinker" ^
     --add-data "gs_bin;gs_bin" ^
-    --icon "app_icon.ico" ^
+    --icon "%ICON_PATH%" ^
     --clean ^
     --noconfirm ^
     pdf_shrinker.py
@@ -114,6 +121,10 @@ echo [4/4] Cleaning up...
 rmdir /s /q gs_bin
 rmdir /s /q build
 del /q "PDF Shrinker.spec" 2>nul
+
+REM ── Flush Windows icon cache so the new icon shows immediately ──
+echo Refreshing icon cache...
+ie4uinit.exe -show >nul 2>&1 || true
 
 echo.
 echo ============================================================
