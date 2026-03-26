@@ -102,6 +102,7 @@ python -m PyInstaller ^
     --windowed ^
     --name "PDF Shrinker" ^
     --add-data "gs_bin;gs_bin" ^
+    --icon "app_icon.ico" ^
     --clean ^
     --noconfirm ^
     pdf_shrinker.py

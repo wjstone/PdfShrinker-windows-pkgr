@@ -39,18 +39,24 @@ def find_ghostscript():
                 return str(bundled)
 
     # ── 2. System installation ───────────────────────────────────────────────
-    candidates = [
-        "gswin64c", "gswin64", "gswin32c", "gswin32", "gs",  # PATH
-    ]
-    # Scan C:\Program Files\gs\* dynamically (newest first)
-    for prog_files in [r"C:\Program Files", r"C:\Program Files (x86)"]:
-        gs_root = Path(prog_files) / "gs"
-        if gs_root.exists():
-            for ver_dir in sorted(gs_root.iterdir(), reverse=True):
-                for exe in ["gswin64c.exe", "gswin64.exe", "gswin32c.exe", "gswin32.exe"]:
-                    p = ver_dir / "bin" / exe
-                    if p.exists():
-                        candidates.append(str(p))
+    if sys.platform == "win32":
+        candidates = ["gswin64c", "gswin64", "gswin32c", "gswin32", "gs"]
+        for prog_files in [r"C:\Program Files", r"C:\Program Files (x86)"]:
+            gs_root = Path(prog_files) / "gs"
+            if gs_root.exists():
+                for ver_dir in sorted(gs_root.iterdir(), reverse=True):
+                    for exe in ["gswin64c.exe", "gswin64.exe", "gswin32c.exe", "gswin32.exe"]:
+                        p = ver_dir / "bin" / exe
+                        if p.exists():
+                            candidates.append(str(p))
+    else:
+        # macOS — Homebrew (Apple Silicon and Intel) and MacPorts
+        candidates = [
+            "/opt/homebrew/bin/gs",   # Homebrew Apple Silicon (M1/M2/M3)
+            "/usr/local/bin/gs",      # Homebrew Intel
+            "/opt/local/bin/gs",      # MacPorts
+            "gs",                     # PATH fallback
+        ]
 
     for c in candidates:
         path = shutil.which(c) or (c if os.path.isfile(c) else None)
@@ -94,13 +100,16 @@ def compress_with_ghostscript(src: str, dst: str, preset: str,
         src,
     ]
 
-    CREATE_NO_WINDOW = 0x08000000  # Windows flag - suppresses the CMD box
+    # CREATE_NO_WINDOW suppresses the CMD box on Windows; not needed/available on Mac
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x08000000
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        creationflags=CREATE_NO_WINDOW,
+        **kwargs,
     )
 
     page_num = 0
@@ -181,14 +190,34 @@ def default_output(src: str) -> str:
 
 # ── GUI ──────────────────────────────────────────────────────────────────────
 
-DARK   = "#1e1e2e"
-PANEL  = "#2a2a3e"
-ACCENT = "#7c6af7"
-GREEN  = "#50fa7b"
-RED    = "#ff5555"
-FG     = "#cdd6f4"
-SUBTLE = "#6c7086"
-ENTRY  = "#313244"
+# Light, native-feeling palette
+BG       = "#f5f5f5"   # window background
+SURFACE  = "#ffffff"   # card / input surface
+BORDER   = "#d1d1d1"   # subtle borders
+BORDER2  = "#b0b0b0"   # hover / emphasis borders
+FG       = "#1a1a1a"   # primary text
+FG2      = "#555555"   # secondary text
+FG3      = "#888888"   # hint / label text
+ACCENT   = "#1a1a1a"   # primary button bg (near-black)
+ACCENT_H = "#333333"   # primary button hover
+SEL_BG   = "#dbeafe"   # preset selected background (blue-50)
+SEL_FG   = "#1d4ed8"   # preset selected text (blue-700)
+SEL_BD   = "#93c5fd"   # preset selected border (blue-300)
+SUCCESS_BG = "#dcfce7" # savings card bg (green-100)
+SUCCESS_FG = "#166534" # savings card text (green-800)
+ERR_FG   = "#dc2626"   # error red
+
+# Platform-appropriate font
+import platform as _platform
+if _platform.system() == "Darwin":
+    FONT = "-apple-system"
+    _SIZE = lambda n: n - 1   # macOS renders slightly larger
+else:
+    FONT = "Segoe UI"
+    _SIZE = lambda n: n
+
+def F(size, weight="normal"):
+    return (FONT, _SIZE(size), weight)
 
 
 class PDFShrinkerApp(tk.Tk):
@@ -196,7 +225,8 @@ class PDFShrinkerApp(tk.Tk):
         super().__init__()
         self.title("PDF Shrinker")
         self.resizable(False, False)
-        self.configure(bg=DARK)
+        self.configure(bg=BG)
+        self._setup_styles()
         self._build_ui()
         self._center()
 
@@ -206,135 +236,226 @@ class PDFShrinkerApp(tk.Tk):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"+{(sw-w)//2}+{(sh-h)//2}")
 
+    def _setup_styles(self):
+        s = ttk.Style()
+        s.theme_use("default")
+        s.configure("TProgressbar",
+                     troughcolor=BORDER,
+                     background=ACCENT,
+                     borderwidth=0,
+                     relief="flat",
+                     thickness=4)
+
     # ── Layout ───────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        pad = dict(padx=20, pady=10)
-
-        # Title bar
-        hdr = tk.Frame(self, bg=PANEL, height=56)
+        # ── Header ───────────────────────────────────────────────────────────
+        hdr = tk.Frame(self, bg=SURFACE,
+                       highlightbackground=BORDER, highlightthickness=1)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="⬛ PDF Shrinker", font=("Segoe UI", 16, "bold"),
-                 fg=ACCENT, bg=PANEL).pack(side="left", padx=20, pady=12)
-        gs_txt = f"Ghostscript ✓" if GS_PATH else "Ghostscript ✗ (using built-in)"
-        gs_col = GREEN if GS_PATH else SUBTLE
-        tk.Label(hdr, text=gs_txt, font=("Segoe UI", 9),
-                 fg=gs_col, bg=PANEL).pack(side="right", padx=20, pady=16)
+        tk.Label(hdr, text="PDF Shrinker", font=F(14, "bold"),
+                 fg=FG, bg=SURFACE).pack(side="left", padx=18, pady=12)
 
-        body = tk.Frame(self, bg=DARK, padx=24, pady=16)
+        gs_dot  = "●" if GS_PATH else "○"
+        gs_txt  = "Ghostscript ready" if GS_PATH else "Built-in mode"
+        gs_col  = "#16a34a" if GS_PATH else FG3
+        gs_lbl  = tk.Frame(hdr, bg=SURFACE)
+        gs_lbl.pack(side="right", padx=18, pady=12)
+        tk.Label(gs_lbl, text=gs_dot, font=F(9), fg=gs_col, bg=SURFACE).pack(side="left")
+        tk.Label(gs_lbl, text=f" {gs_txt}", font=F(10), fg=FG3, bg=SURFACE).pack(side="left")
+
+        # ── Body ─────────────────────────────────────────────────────────────
+        body = tk.Frame(self, bg=BG, padx=20, pady=18)
         body.pack(fill="both")
 
-        # ── Input file
-        self._section(body, "Input PDF")
-        row = tk.Frame(body, bg=DARK)
-        row.pack(fill="x", pady=(4, 0))
+        # ── Input
+        self._label(body, "Input PDF")
+        row = tk.Frame(body, bg=BG)
+        row.pack(fill="x", pady=(5, 0))
         self.inp_var = tk.StringVar()
-        self.inp_entry = self._entry(row, self.inp_var, width=52)
-        self.inp_entry.pack(side="left", fill="x", expand=True)
-        self._btn(row, "Browse…", self._browse_input).pack(side="left", padx=(8, 0))
+        self._entry(row, self.inp_var).pack(side="left", fill="x", expand=True)
+        self._browse_btn(row, "Browse…", self._browse_input).pack(side="left", padx=(6, 0))
 
-        # ── Output file
-        self._section(body, "Output PDF")
-        row2 = tk.Frame(body, bg=DARK)
-        row2.pack(fill="x", pady=(4, 0))
+        # ── Output
+        self._label(body, "Output PDF", top=14)
+        row2 = tk.Frame(body, bg=BG)
+        row2.pack(fill="x", pady=(5, 0))
         self.out_var = tk.StringVar()
-        self._entry(row2, self.out_var, width=52).pack(side="left", fill="x", expand=True)
-        self._btn(row2, "Browse…", self._browse_output).pack(side="left", padx=(8, 0))
+        self._entry(row2, self.out_var).pack(side="left", fill="x", expand=True)
+        self._browse_btn(row2, "Browse…", self._browse_output).pack(side="left", padx=(6, 0))
 
-        # ── Settings
-        self._section(body, "Compression Settings")
-        cfg = tk.Frame(body, bg=DARK)
-        cfg.pack(fill="x", pady=(4, 0))
-
+        # ── Preset buttons (GS) or quality slider (fallback)
+        self._label(body, "Quality preset" if GS_PATH else "Image quality", top=14)
         if GS_PATH:
-            tk.Label(cfg, text="Preset:", font=("Segoe UI", 10),
-                     fg=FG, bg=DARK).grid(row=0, column=0, sticky="w")
-            self.preset_var = tk.StringVar(value=list(GS_PRESETS)[1])
-            cb = ttk.Combobox(cfg, textvariable=self.preset_var,
-                               values=list(GS_PRESETS), state="readonly", width=30)
-            cb.grid(row=0, column=1, sticky="w", padx=(10, 0))
-            self._style_combo(cb)
+            self._build_presets(body)
         else:
-            tk.Label(cfg, text="Image quality:", font=("Segoe UI", 10),
-                     fg=FG, bg=DARK).grid(row=0, column=0, sticky="w")
-            self.quality_var = tk.IntVar(value=60)
-            sl = ttk.Scale(cfg, from_=10, to=95, variable=self.quality_var,
-                            orient="horizontal", length=200)
-            sl.grid(row=0, column=1, padx=(10, 0))
-            self.q_lbl = tk.Label(cfg, text="60", font=("Segoe UI", 10),
-                                   fg=ACCENT, bg=DARK, width=3)
-            self.q_lbl.grid(row=0, column=2, padx=(6, 0))
-            self.quality_var.trace_add("write",
-                lambda *_: self.q_lbl.config(text=str(self.quality_var.get())))
+            self._build_quality_slider(body)
 
-        # ── Progress
+        # ── Progress bar (slim, native-style)
         self.prog_var = tk.DoubleVar(value=0)
-        self.prog_bar = ttk.Progressbar(body, variable=self.prog_var,
-                                         maximum=100, length=480)
-        self.prog_bar.pack(pady=(20, 4))
-        self._style_progress()
+        prog_wrap = tk.Frame(body, bg=BG)
+        prog_wrap.pack(fill="x", pady=(18, 0))
+        self.prog_bar = ttk.Progressbar(prog_wrap, variable=self.prog_var,
+                                         maximum=100, style="TProgressbar")
+        self.prog_bar.pack(fill="x")
 
+        status_row = tk.Frame(body, bg=BG)
+        status_row.pack(fill="x", pady=(4, 0))
         self.status_var = tk.StringVar(value="Ready")
-        tk.Label(body, textvariable=self.status_var, font=("Segoe UI", 9),
-                 fg=SUBTLE, bg=DARK).pack()
+        tk.Label(status_row, textvariable=self.status_var,
+                 font=F(10), fg=FG3, bg=BG).pack(side="left")
 
-        # ── Result card
-        self.result_frame = tk.Frame(body, bg=PANEL, bd=0,
-                                      highlightthickness=0, padx=16, pady=12)
-        self.result_frame.pack(fill="x", pady=(12, 0))
-        self.r_orig  = self._result_label(self.result_frame, "Original", "—", 0)
-        self.r_new   = self._result_label(self.result_frame, "Compressed", "—", 1)
-        self.r_saved = self._result_label(self.result_frame, "Savings", "—", 2)
-        self.result_frame.columnconfigure((0, 1, 2), weight=1)
+        # ── Stats cards
+        cards = tk.Frame(body, bg=BG)
+        cards.pack(fill="x", pady=(16, 0))
+        cards.columnconfigure((0, 1, 2), weight=1)
+
+        self.r_orig  = self._stat_card(cards, "Original",    "—", 0, success=False)
+        self.r_new   = self._stat_card(cards, "Compressed",  "—", 1, success=False)
+        self.r_saved = self._stat_card(cards, "Saved",       "—", 2, success=False)
+        self._saved_card_frame = cards.grid_slaves(row=0, column=2)[0]
 
         # ── Compress button
-        self.go_btn = tk.Button(body, text="Compress PDF",
-                                 font=("Segoe UI", 12, "bold"),
-                                 bg=ACCENT, fg="white", relief="flat",
-                                 padx=32, pady=10, cursor="hand2",
-                                 activebackground="#6a5af0",
-                                 command=self._run)
-        self.go_btn.pack(pady=(20, 4))
+        self.go_btn = tk.Button(
+            body, text="Compress PDF",
+            font=F(12, "bold"),
+            bg=ACCENT, fg=SURFACE,
+            relief="flat", bd=0,
+            padx=0, pady=10,
+            cursor="hand2",
+            activebackground=ACCENT_H,
+            activeforeground=SURFACE,
+            command=self._run
+        )
+        self.go_btn.pack(fill="x", pady=(16, 4))
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+        # Subtle hover effect on button
+        self.go_btn.bind("<Enter>", lambda e: self.go_btn.config(bg=ACCENT_H))
+        self.go_btn.bind("<Leave>", lambda e: self.go_btn.config(bg=ACCENT))
 
-    def _section(self, parent, text):
-        tk.Label(parent, text=text.upper(),
-                 font=("Segoe UI", 8, "bold"), fg=SUBTLE, bg=DARK
-                 ).pack(anchor="w", pady=(14, 0))
+    # ── Preset toggle buttons ─────────────────────────────────────────────────
 
-    def _entry(self, parent, var, width=40):
-        e = tk.Entry(parent, textvariable=var, width=width,
-                     bg=ENTRY, fg=FG, insertbackground=FG,
-                     relief="flat", font=("Segoe UI", 10), bd=6)
-        return e
+    def _build_presets(self, parent):
+        PRESET_LABELS = [
+            ("Screen",   "72 dpi",  "screen"),
+            ("Ebook",    "150 dpi", "ebook"),
+            ("Printer",  "300 dpi", "printer"),
+            ("Prepress", "300+ dpi","prepress"),
+        ]
+        self._preset_key = tk.StringVar(value="ebook")
+        self._preset_btns = {}
 
-    def _btn(self, parent, text, cmd):
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", pady=(5, 0))
+        row.columnconfigure((0,1,2,3), weight=1)
+
+        for col, (label, sub, key) in enumerate(PRESET_LABELS):
+            btn = tk.Button(
+                row,
+                text=label + "\n" + sub,
+                font=F(10),
+                relief="flat", bd=0,
+                padx=4, pady=7,
+                cursor="hand2",
+                justify="center",
+                command=lambda k=key: self._select_preset(k),
+                highlightthickness=1,
+            )
+            btn.grid(row=0, column=col, padx=(0, 4) if col < 3 else 0, sticky="ew")
+            self._preset_btns[key] = btn
+
+        self._select_preset("ebook")
+
+    def _select_preset(self, key):
+        self._preset_key.set(key)
+        for k, btn in self._preset_btns.items():
+            if k == key:
+                btn.config(bg=SEL_BG, fg=SEL_FG,
+                           highlightbackground=SEL_BD,
+                           font=F(10, "bold"))
+            else:
+                btn.config(bg=SURFACE, fg=FG2,
+                           highlightbackground=BORDER,
+                           font=F(10))
+
+    def _build_quality_slider(self, parent):
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", pady=(5, 0))
+        self.quality_var = tk.IntVar(value=60)
+        sl = ttk.Scale(row, from_=10, to=95, variable=self.quality_var,
+                        orient="horizontal")
+        sl.pack(side="left", fill="x", expand=True)
+        self.q_lbl = tk.Label(row, text="60", font=F(10), fg=FG, bg=BG, width=3)
+        self.q_lbl.pack(side="left", padx=(8, 0))
+        self.quality_var.trace_add("write",
+            lambda *_: self.q_lbl.config(text=str(self.quality_var.get())))
+
+    # ── Widget helpers ────────────────────────────────────────────────────────
+
+    def _label(self, parent, text, top=0):
+        tk.Label(parent, text=text,
+                 font=F(10, "bold"), fg=FG2, bg=BG
+                 ).pack(anchor="w", pady=(top, 0))
+
+    def _entry(self, parent, var):
+        e = tk.Entry(parent, textvariable=var,
+                     bg=SURFACE, fg=FG,
+                     insertbackground=FG,
+                     relief="flat", bd=0,
+                     font=F(10),
+                     highlightthickness=1,
+                     highlightbackground=BORDER,
+                     highlightcolor=BORDER2)
+        e.config(width=46)
+        # Add inner padding via a wrapper frame
+        wrap = tk.Frame(parent, bg=SURFACE,
+                        highlightthickness=1,
+                        highlightbackground=BORDER)
+        e2 = tk.Entry(wrap, textvariable=var,
+                      bg=SURFACE, fg=FG,
+                      insertbackground=FG,
+                      relief="flat", bd=0,
+                      font=F(10))
+        e2.pack(padx=8, pady=6, fill="x")
+        wrap.pack_forget()  # will be managed by caller
+        return wrap
+
+    def _browse_btn(self, parent, text, cmd):
         return tk.Button(parent, text=text, command=cmd,
-                         bg=PANEL, fg=FG, relief="flat",
-                         font=("Segoe UI", 10), padx=10, pady=5,
-                         cursor="hand2", activebackground=ENTRY)
+                         bg=SURFACE, fg=FG,
+                         relief="flat", bd=0,
+                         font=F(10),
+                         padx=10, pady=0,
+                         cursor="hand2",
+                         highlightthickness=1,
+                         highlightbackground=BORDER,
+                         activebackground=BG)
 
-    def _result_label(self, parent, title, value, col):
-        f = tk.Frame(parent, bg=PANEL)
-        f.grid(row=0, column=col, padx=8, sticky="ew")
-        tk.Label(f, text=title, font=("Segoe UI", 8), fg=SUBTLE, bg=PANEL).pack()
-        lbl = tk.Label(f, text=value, font=("Segoe UI", 14, "bold"),
-                        fg=FG, bg=PANEL)
-        lbl.pack()
+    def _stat_card(self, parent, title, value, col, success=False):
+        card_bg = SUCCESS_BG if success else "#f0f0f0"
+        card_fg = SUCCESS_FG if success else FG
+        lbl_fg  = SUCCESS_FG if success else FG3
+
+        f = tk.Frame(parent, bg=card_bg, padx=12, pady=10)
+        f.grid(row=0, column=col, padx=(0, 6) if col < 2 else 0, sticky="ew")
+        tk.Label(f, text=title, font=F(9), fg=lbl_fg, bg=card_bg).pack(anchor="w")
+        lbl = tk.Label(f, text=value, font=F(16, "bold"), fg=card_fg, bg=card_bg)
+        lbl.pack(anchor="w")
         return lbl
 
-    def _style_combo(self, cb):
-        s = ttk.Style()
-        s.theme_use("default")
-        s.configure("TCombobox", fieldbackground=ENTRY, background=ENTRY,
-                     foreground=FG, selectbackground=ACCENT)
-
-    def _style_progress(self):
-        s = ttk.Style()
-        s.theme_use("default")
-        s.configure("TProgressbar", troughcolor=PANEL,
-                     background=ACCENT, borderwidth=0, relief="flat")
+    def _set_stat_card_success(self, col, success):
+        """Re-colour a stat card after compression completes."""
+        card_bg = SUCCESS_BG if success else "#f0f0f0"
+        card_fg = SUCCESS_FG if success else FG
+        lbl_fg  = SUCCESS_FG if success else FG3
+        card = self._saved_card_frame if col == 2 else None
+        if card:
+            for widget in card.winfo_children():
+                widget.config(bg=card_bg,
+                              fg=(lbl_fg if isinstance(widget, tk.Label)
+                                  and widget.cget("font") == str(F(9))
+                                  else card_fg))
+            card.config(bg=card_bg)
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -363,9 +484,9 @@ class PDFShrinkerApp(tk.Tk):
             messagebox.showerror("Error", "Please specify an output file.")
             return
 
-        self.go_btn.config(state="disabled")
+        self.go_btn.config(state="disabled", bg="#999999")
         self.prog_var.set(0)
-        self.status_var.set("Compressing…")
+        self.status_var.set("Starting…")
 
         def task():
             try:
@@ -376,7 +497,7 @@ class PDFShrinkerApp(tk.Tk):
                     ))
 
                 if GS_PATH:
-                    preset = GS_PRESETS[self.preset_var.get()]
+                    preset = GS_PRESETS[self._preset_key.get()]
                     orig, new = compress_with_ghostscript(src, dst, preset, cb)
                 else:
                     q = self.quality_var.get()
@@ -388,11 +509,23 @@ class PDFShrinkerApp(tk.Tk):
                 def update():
                     self.r_orig.config(text=human_size(orig))
                     self.r_new.config(text=human_size(new))
-                    saved_txt = f"-{human_size(savings)} ({pct:.1f}%)"
-                    color = GREEN if savings > 0 else RED
-                    self.r_saved.config(text=saved_txt, fg=color)
-                    self.status_var.set("Done! ✓")
-                    self.go_btn.config(state="normal")
+                    self.r_saved.config(text=f"{pct:.1f}%")
+
+                    # Re-colour savings card green if we actually saved space
+                    saved_card = self._saved_card_frame
+                    if savings > 0:
+                        saved_card.config(bg=SUCCESS_BG)
+                        for w in saved_card.winfo_children():
+                            w.config(bg=SUCCESS_BG,
+                                     fg=SUCCESS_FG)
+                    else:
+                        saved_card.config(bg="#f0f0f0")
+                        for w in saved_card.winfo_children():
+                            w.config(bg="#f0f0f0",
+                                     fg=(FG3 if w.cget("text") == "Saved" else ERR_FG))
+
+                    self.status_var.set("Done  ✓")
+                    self.go_btn.config(state="normal", bg=ACCENT)
 
                 self.after(0, update)
 
@@ -400,7 +533,7 @@ class PDFShrinkerApp(tk.Tk):
                 def err():
                     messagebox.showerror("Compression failed", str(e))
                     self.status_var.set("Error.")
-                    self.go_btn.config(state="normal")
+                    self.go_btn.config(state="normal", bg=ACCENT)
                 self.after(0, err)
 
         threading.Thread(target=task, daemon=True).start()
